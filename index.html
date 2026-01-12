@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DoorDash Grabber v3.0 - FIXED</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 400px; margin: 0 auto; }
+        h1 { text-align: center; margin-bottom: 30px; font-size: 28px; }
+        input { 
+            width: 100%; padding: 15px; margin: 10px 0; 
+            border: none; border-radius: 12px; font-size: 16px;
+            background: rgba(255,255,255,0.2); color: white;
+        }
+        button {
+            width: 100%; padding: 18px; margin: 10px 0; border: none;
+            border-radius: 12px; font-size: 18px; font-weight: 600;
+            background: #ff4757; color: white; cursor: pointer;
+            transition: all 0.3s; box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        button:hover:not(:disabled) { background: #ff3742; transform: translateY(-2px); }
+        button:disabled { background: #666; cursor: not-allowed; }
+        
+        .status { padding: 15px; margin: 15px 0; border-radius: 12px; text-align: center; font-weight: 600; }
+        .active { background: rgba(40,167,69,0.3); }
+        .grabbing { background: rgba(0,123,255,0.3); }
+        .success { background: rgba(40,167,69,0.5); }
+        .error { background: rgba(220,53,69,0.3); }
+        
+        .log { background: rgba(0,0,0,0.4); height: 250px; overflow-y: auto; padding: 15px; border-radius: 12px; font-family: monospace; font-size: 13px; margin-top: 20px; }
+        .log-entry { margin: 3px 0; padding: 2px 0; }
+        .success-log { color: #51cf66; }
+        .error-log { color: #ff6b6b; }
+        .grab-log { color: #ffd43b; font-weight: bold; }
+        
+        #instructions { background: rgba(255,255,255,0.1); padding: 15px; border-radius: 12px; margin: 20px 0; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 DoorDash Grabber v3.0</h1>
+        <p style="text-align: center; opacity: 0.8;">iOS Safari - UI Automation</p>
+        
+        <div id="loginForm">
+            <input type="email" id="email" placeholder="👤 Dasher Email" required>
+            <input type="password" id="password" placeholder="🔑 Dasher Password" required>
+            <button onclick="startBot()">🔥 START GRABBER</button>
+        </div>
+        
+        <div id="instructions">
+            <strong>📱 Instructions:</strong><br>
+            1. Enter credentials → Start<br>
+            2. Opens DoorDash Dasher → Auto-login<br>
+            3. Auto-clicks available orders (25ms speed)<br>
+            4. Keep page open in background!
+        </div>
+        
+        <div class="status error" id="status">Enter credentials and start...</div>
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        const log = (msg, type = '') => {
+            const logEl = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.innerHTML = `<strong>${new Date().toLocaleTimeString()}</strong> ${msg}`;
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight;
+            console.log(msg);
+        };
+
+        const setStatus = (type, msg) => {
+            const status = document.getElementById('status');
+            status.textContent = msg;
+            status.className = `status ${type}`;
+        };
+
+        let botRunning = false;
+        let pollInterval;
+
+        async function startBot() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            
+            if (!email || !password) {
+                alert('Enter email & password!');
+                return;
+            }
+
+            log('🚀 Starting DoorDash Grabber...');
+            setStatus('grabbing', 'Opening DoorDash Dasher...');
+            document.querySelector('button').disabled = true;
+            document.getElementById('loginForm').style.display = 'none';
+
+            // Step 1: Open DoorDash Dasher in new tab
+            const dasherUrl = 'https://dasher.doordash.com/login/';
+            const dasherTab = window.open(dasherUrl, '_blank');
+            
+            if (!dasherTab) {
+                alert('🚫 Popup blocked! Enable popups for this site');
+                return;
+            }
+
+            // Step 2: Wait 3s then auto-fill login (script injection)
+            setTimeout(() => {
+                log('🔐 Auto-filling login...');
+                dasherTab.eval(`
+                    // Auto-fill email
+                    document.querySelector('input[type="email"], input[placeholder*="email"]').value = '${email}';
+                    document.querySelector('input[type="email"], input[placeholder*="email"]').dispatchEvent(new Event('input', {bubbles: true}));
+                    
+                    // Auto-fill password  
+                    document.querySelector('input[type="password"]').value = '${password}';
+                    document.querySelector('input[type="password"]').dispatchEvent(new Event('input', {bubbles: true}));
+                    
+                    // Auto-submit
+                    setTimeout(() => {
+                        document.querySelector('button[type="submit"], button:contains("Log"), .login-button').click();
+                    }, 1000);
+                `);
+            }, 3000);
+
+            // Step 3: Start order monitoring after login (10s delay)
+            setTimeout(() => {
+                log('👀 Monitoring for orders...');
+                setStatus('active', '🔥 Bot active - watching orders!');
+                startOrderGrabber(dasherTab);
+            }, 12000);
+        }
+
+        function startOrderGrabber(dasherTab) {
+            botRunning = true;
+            let ordersFound = 0;
+            let ordersGrabbed = 0;
+
+            pollInterval = setInterval(() => {
+                if (!botRunning || dasherTab.closed) {
+                    clearInterval(pollInterval);
+                    return;
+                }
+
+                // Inject grabber script into DoorDash tab
+                dasherTab.eval(`
+                    // Navigate to Available Orders
+                    if (location.pathname.includes('/dashboard')) {
+                        document.querySelector('[data-testid="orders-tab"], a[href*="/orders"], .orders-tab')?.click();
+                    }
+                    
+                    // Scan for available orders (multiple selectors)
+                    const orderSelectors = [
+                        '[data-testid="accept-order"]',
+                        '.accept-order-btn',
+                        'button:contains("Accept")',
+                        '[role="button"]:contains("Available")',
+                        '.order-card button'
+                    ];
+                    
+                    const acceptBtn = document.querySelector(orderSelectors.join(','));
+                    
+                    if (acceptBtn) {
+                        console.log('🎯 ORDER FOUND!');
+                        acceptBtn.click();
+                        acceptBtn.click(); // Double-click for reliability
+                    }
+                `);
+
+                // Check console for grabs
+                try {
+                    const consoleLogs = dasherTab.console.logs || [];
+                    consoleLogs.forEach(log => {
+                        if (log.includes('ORDER FOUND')) {
+                            ordersFound++;
+                            log(`🎯 ${ordersFound} orders found!`, 'grab-log');
+                        }
+                    });
+                } catch(e) {}
+                
+            }, 25); // 25ms polling speed
+
+            log('⚡ Ultra-fast 25ms polling active!');
+        }
+
+        function stopBot() {
+            botRunning = false;
+            clearInterval(pollInterval);
+            setStatus('error', '🛑 Bot stopped');
+            document.querySelector('button').disabled = false;
+            log('⏹️ Grabber stopped');
+        }
+
+        // Global hotkeys
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && e.ctrlKey) startBot();
+            if (e.key === 'Escape') stopBot();
+        });
+
+        // Graceful cleanup
+        window.addEventListener('beforeunload', () => {
+            if (botRunning) stopBot();
+        });
+
+        log('✅ Grabber loaded! Ctrl+Enter to start, ESC to stop');
+        setStatus('grabbing', 'Ready - Enter credentials above');
+    </script>
+</body>
+</html>
